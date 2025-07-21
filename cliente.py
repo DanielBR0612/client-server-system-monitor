@@ -40,7 +40,9 @@ def main():
         c.showServers()
         if c.servidores:
             ip = list(c.servidores.keys())[0]
+            print(ip)
             porta = c.servidores[ip]['porta']
+            print(porta)
             comando = input("Digite um comando para enviar ao servidor: ")
             c.enviarComando(ip, porta, comando)
         time.sleep(30)
