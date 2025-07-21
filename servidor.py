@@ -9,7 +9,6 @@ class Servidor:
         self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.ipPorta = (ip, porta)
         self.soc.bind(self.ipPorta)
-
     
     def ligar(self) -> None:
         self.soc.listen()
