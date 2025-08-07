@@ -1,6 +1,6 @@
 # 🖥️ Sistema de Monitoramento de Computadores em Rede
 
-Aplicação cliente-servidor desenvolvida como tarefa bimestral da disciplina de Análise e Projeto Orientado a Objetos. O objetivo do projeto é recuperar e exibir dados de computadores conectados em uma rede local, utilizando sockets puros com comunicação criptografada e programação orientada a objetos (POO).
+Aplicação cliente-servidor desenvolvida como tarefa bimestral da disciplina de Redes de Computadores. O objetivo do projeto é recuperar e exibir dados de computadores conectados em uma rede local, utilizando sockets puros com comunicação criptografada e programação orientada a objetos (POO).
 
 ---
 
