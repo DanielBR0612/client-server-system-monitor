@@ -4,7 +4,6 @@ import json
 from cryptography.fernet import Fernet
 from sistema import Sistema
 
-# Classe Cliente, mantendo a estrutura que você criou
 class Cliente:
     def __init__(self):
         self.servidor_encontrado = None 
@@ -63,7 +62,6 @@ class Cliente:
 
 
 def main():
-    # Orquestra a execução do cliente
     cliente = Cliente()
     cliente.escutarServidores()
     cliente.enviar_info()

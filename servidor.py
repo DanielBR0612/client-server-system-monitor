@@ -1,4 +1,3 @@
-# servidor_final_com_menu.py
 import socket
 import json
 from threading import Thread, Lock
