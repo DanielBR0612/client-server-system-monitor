@@ -1,140 +1,165 @@
+# servidor_final_com_menu.py
 import socket
-from threading import Thread
-import time
-import random
 import json
+from threading import Thread, Lock
+import time
+from cryptography.fernet import Fernet
+import statistics
+import random
 
 class Servidor:
     def __init__(self, ip: str, porta: int):
         self.ip = ip
         self.porta = porta
-        self.servidor_tcp_thread = None
-        self.info = {}  # ← armazena dados recebidos por IP
-        self.recebendo_dados = True
-
-    def publicarCoiso(self) -> None:
-        interfaces = socket.getaddrinfo(host=socket.gethostname(), port=None, family=socket.AF_INET)
-        allips = [ip[-1][0] for ip in interfaces]
-        msg = str((self.ip, self.porta)).encode("utf-8")
+        self.clientes_info = {}
+        self.servidor_online = True 
+        self.lock = Lock() 
         
-        while True:
-            for ip in allips:
-                print(f'Publicando em {ip}:{5005}')
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                sock.bind((ip, 0))
-                sock.sendto(msg, ("255.255.255.255", 5005)) 
-                sock.close()
+        chave_secreta = b'pe7TtaxA65h4y5e0k2z3D-gGyx3g2H2aI8_Jd3g-2Zc='
+        self.fernet = Fernet(chave_secreta)
+
+    def publicarCoiso(self):
+        sock_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock_udp.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        mensagem = json.dumps({'ip_servidor': self.ip, 'porta_servidor': self.porta}).encode('utf-8')
+        
+        while self.servidor_online:
+            sock_udp.sendto(mensagem, ('255.255.255.255', 5005))
             time.sleep(10)
 
-    def lidar_com_cliente(self, conexao_cliente: socket.socket, endereco_cliente: tuple) -> None:
-        print(f"Conexão aceita de {endereco_cliente}")
+    def lidar_com_cliente(self, conexao, endereco):
+        """Lógica para tratar um único cliente."""
+        ip_cliente = endereco[0]
+        print(f"\n[INFO] Conexão aceita de {ip_cliente}. Processando...")
         try:
-            dados_recebidos = conexao_cliente.recv(4096)
-            if not dados_recebidos:
-                conexao_cliente.close()
+            dados_criptografados = conexao.recv(4096)
+            if not dados_criptografados:
                 return
 
-            # Tenta decodificar como JSON
-            try:
-                dados = json.loads(dados_recebidos.decode("utf-8"))
-                self.info[endereco_cliente[0]] = {
-                    'espaco_livre_hd': dados.get("espaco_livre_hd", "Desconhecido"),
-                    'qtd_processadores': dados.get("qtd_processadores", "Desconhecido"),
-                    'espaco_memoria': dados.get("espaco_memoria", "Desconhecido"),
-                    'temperatura': dados.get("temperatura", "Desconhecido")
-                }
-                self.salvar_em_json()
-                if self.recebendo_dados:
-                    print(f"Dados do IP {endereco_cliente[0]} armazenados com sucesso.")
-                conexao_cliente.sendall(b"Dados recebidos e salvos com sucesso.")
-            except json.JSONDecodeError:
-                comando = dados_recebidos.decode("utf-8").strip()
-                print(f"Comando recebido de {endereco_cliente}: {comando}")
-
-            if comando.lower() == "ping":
-                resposta_servidor = "Pong!"
-            elif comando.lower() == "hora":
-                resposta_servidor = f"A hora atual é {time.strftime('%H:%M:%S')}"
-            else:
-                resposta_servidor = f"Comando '{comando}' recebido com sucesso!"
+            dados_decriptados = self.fernet.decrypt(dados_criptografados)
+            dados_cliente = json.loads(dados_decriptados.decode('utf-8'))
             
-            conexao_cliente.sendall(resposta_servidor.encode("utf-8"))
+            with self.lock:
+                self.clientes_info[ip_cliente] = dados_cliente
+            
+            print(f"[INFO] Dados de {ip_cliente} armazenados com sucesso.")
 
         except Exception as e:
-            print(f"Erro ao lidar com cliente {endereco_cliente}: {e}")
+            print(f"Erro ao comunicar com {ip_cliente}: {e}")
         finally:
-            conexao_cliente.close()
+            conexao.close()
 
-    def iniciar_servidor_tcp(self) -> None:
-        print(f"Servidor TCP iniciando em {self.ip}:{self.porta}")
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((self.ip, self.porta))
-            s.listen()
-            print(f"Servidor TCP escutando em {self.ip}:{self.porta}")
+    def iniciar_servidor_tcp(self):
+        """Este método agora roda em uma thread, apenas ouvindo conexões."""
+        servidor_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        servidor_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        servidor_socket.bind((self.ip, self.porta))
+        servidor_socket.listen()
+        print(f"[TCP] Servidor escutando em {self.ip}:{self.porta}")
+
+        while self.servidor_online:
+            try:
+                servidor_socket.settimeout(1.0) 
+                conexao, endereco = servidor_socket.accept()
+                
+                thread_cliente = Thread(target=self.lidar_com_cliente, args=(conexao, endereco))
+                thread_cliente.start()
             
-            while True:
-                # Aceita uma nova conexão de cliente
-                conexao, endereco = s.accept()
-                # Inicia uma nova thread para lidar com este cliente, chamando lidar_com_cliente
-                Thread(target=self.lidar_com_cliente, args=(conexao, endereco)).start()
+            except socket.timeout:
+                continue
+            except Exception as e:
+                if self.servidor_online:
+                    print(f"Erro no servidor TCP: {e}")
+        
+        servidor_socket.close()
+        print("[TCP] Servidor TCP encerrado.")
 
-    def ligar(self) -> None:
-        publicador_thread = Thread(target=self.publicarCoiso, daemon=True)
-        publicador_thread.start()
+    def ligar(self):
+        """Inicia os 'trabalhadores' (threads) do servidor."""
+        thread_broadcast = Thread(target=self.publicarCoiso, daemon=True)
+        thread_broadcast.start()
+        
+        thread_servidor = Thread(target=self.iniciar_servidor_tcp, daemon=True)
+        thread_servidor.start()
 
-        self.servidor_tcp_thread = Thread(target=self.iniciar_servidor_tcp)
-        self.servidor_tcp_thread.start()
+    def desligar(self):
+        """Sinaliza para as threads pararem."""
+        print("\nFinalizando o servidor...")
+        self.servidor_online = False
+        time.sleep(1.5) 
 
-    def receber_dados(self, conexao_cliente: socket.socket, endereco_cliente: tuple):
-        try:
-            msg = conexao_cliente.recv(1024).decode("utf-8")
-            try:
-                dados_recebidos = json.loads(msg)
-                self.info[endereco_cliente[0]] = {
-                    'espaco_livre_hd': dados_recebidos.get("espaco_livre_hd", "Desconhecido"),
-                    'qtd_processadores': dados_recebidos.get("qtd_processadores", "Desconhecido"),
-                    'espaco_memoria': dados_recebidos.get("espaco_memoria", "Desconhecido"),
-                    'temperatura': dados_recebidos.get("temperatura", "Desconhecido")
-                }
-                self.salvar_em_json()
-                if self.recebendo_dados:
-                    print(f"Dados do IP {endereco_cliente[0]} armazenados.")
-            except json.JSONDecodeError:
-                print(f"Erro ao decodificar JSON de {endereco_cliente[0]}. Dados recebidos: {msg}")
+    def listar_clientes(self):
+        with self.lock:
+            if not self.clientes_info:
+                print("\nNenhum cliente conectado ainda.")
+                return
+            
+            print("\n--- Clientes Conectados ---")
+            for ip in self.clientes_info:
+                print(f"- {ip}")
+    
+    def detalhar_cliente(self, ip):
+        with self.lock:
+            if ip not in self.clientes_info:
+                print(f"\nErro: Cliente com IP {ip} não encontrado.")
+                return
+            
+            print(f"\n--- Detalhes de {ip} ---")
+            print(json.dumps(self.clientes_info[ip], indent=2))
+            
+    def calcular_media_cliente(self, ip):
+        with self.lock:
+            if ip not in self.clientes_info:
+                print(f"\nErro: Cliente com IP {ip} não encontrado.")
+                return
+            
+            dados = self.clientes_info[ip]
+            vals = [v for k, v in dados.items() if k in ['qtd_processadores', 'memoria_ram_livre', 'espaco_disco_livre'] and isinstance(v, (int, float))]
+            if not vals:
+                print("\nNão há dados numéricos para calcular a média.")
+                return
 
-            conexao_cliente.close()
-        except Exception as e:
-            print(f"Erro ao receber dados: {e}")
+            print(f"\n>>> Média para {ip}: {statistics.mean(vals):.2f}")
 
-    def salvar_em_json(self):
-        try:
-            dados_salvos = {}
-            try:
-                with open("informacoes_sistema.json", "r") as file:
-                    dados_salvos = json.load(file)
-            except FileNotFoundError:
-                pass
 
-            dados_salvos.update(self.info)
+def menu_interativo(servidor: Servidor):
+    """Loop principal que mostra o menu e interage com o usuário."""
+    time.sleep(1) 
+    while servidor.servidor_online:
+        print("\n--- Menu do Servidor ---")
+        print("1. Listar clientes")
+        print("2. Detalhar cliente")
+        print("3. Calcular média de um cliente")
+        print("4. Sair")
+        
+        escolha = input(">> Digite sua escolha: ").strip()
 
-            with open("informacoes_sistema.json", 'w') as file:
-                json.dump(dados_salvos, file, indent=4)
+        if escolha == '1':
+            servidor.listar_clientes()
+        elif escolha == '2':
+            ip = input("Digite o IP do cliente: ").strip()
+            servidor.detalhar_cliente(ip)
+        elif escolha == '3':
+            ip = input("Digite o IP do cliente: ").strip()
+            servidor.calcular_media_cliente(ip)
+        elif escolha == '4':
+            servidor.desligar()
+            break
+        else:
+            print("Opção inválida.")
 
-        except Exception as e:
-            print(f"Erro ao salvar arquivo JSON: {e}")
 
-def main_servidor():
-    porta =  random.randint(10000, 65000)
-    server = Servidor("0.0.0.0", porta) 
-    server.ligar()
+def main():
+    porta = random.randint(10000, 65535)
+    servidor = Servidor('0.0.0.0', porta)
+    servidor.ligar()
     
     try:
-        if server.servidor_tcp_thread:
-            server.servidor_tcp_thread.join()
+        menu_interativo(servidor)
     except KeyboardInterrupt:
-        print("\nServidor encerrado manualmente.")
+        servidor.desligar()
+    
+    print("Programa finalizado.")
 
 if __name__ == "__main__":
-    main_servidor()
+    main()

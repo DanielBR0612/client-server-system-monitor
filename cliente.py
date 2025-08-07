@@ -1,79 +1,73 @@
+# cliente_final.py
 import socket
-from threading import Thread
-import time
-from sistema import Sistema
 import json
+from cryptography.fernet import Fernet
+from sistema import Sistema
 
+# Classe Cliente, mantendo a estrutura que você criou
 class Cliente:
-    servidores = {}
+    def __init__(self):
+        self.servidor_encontrado = None 
+        chave_secreta = b'pe7TtaxA65h4y5e0k2z3D-gGyx3g2H2aI8_Jd3g-2Zc='
+        self.fernet = Fernet(chave_secreta)
 
-    def __init__(self) -> None:
-        self.server_ip = None
-        self.server_port = None
-
-        self.publicador = Thread(target=self.escutarServidores, daemon=True)
-        self.publicador.start()
-        print("Executador Iniciado...")
-
-    def escutarServidores(self):
-        print("Esperando servidores...")
-        HOST = ''
-        PORT = 5005
-        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        udp.bind((HOST, PORT))
+    def escutarServidores(self, timeout=15):
+        print(f"Procurando por um servidor na rede por até {timeout} segundos...")
         
-        while True:
-            msg, cliente = udp.recvfrom(1024)
-            ip_cliente = cliente[0]
-            tupla = eval(msg.decode("utf-8"))  # Ex: ('192.168.1.87', 8888)
-            self.servidores[ip_cliente] = {"porta": tupla[1], "lastPing": int(time.time())}
-
-            # Define o primeiro servidor encontrado como o principal
-            if self.server_ip is None:
-                self.server_ip = ip_cliente
-                self.server_port = tupla[1]
-                print(f"Servidor principal definido: {self.server_ip}:{self.server_port}")
-
-    def showServers(self):
-        print("Servidores disponíveis:")
-        for ip, info in self.servidores.items():
-            print(f"{ip}:{info['porta']} (último ping: {info['lastPing']})")
-            
-    def enviarComando(self, ip: str, porta: int, comando: str):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp:
-            tcp.connect((ip, porta))
-            tcp.sendall(comando.encode("utf-8"))
-            resposta = tcp.recv(1024).decode("utf-8")
-            print("Resposta do servidor:", resposta)
-    
-    def enviar_info(self):
-        if self.server_ip is None or self.server_port is None:
-            print("Nenhum servidor conhecido ainda.")
-            return
+        sock_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock_udp.settimeout(timeout)
+        sock_udp.bind(('', 5005))
 
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((self.server_ip, self.server_port))
+            msg_bytes, endereco_servidor = sock_udp.recvfrom(1024)
+            dados_servidor = json.loads(msg_bytes.decode('utf-8'))
+            
+            ip_servidor = endereco_servidor[0]
+            porta_servidor = dados_servidor['porta_servidor']
+            
+            self.servidor_encontrado = (ip_servidor, porta_servidor)
+            print(f"Servidor encontrado em {self.servidor_encontrado}!")
+        except socket.timeout:
+            print("Nenhum servidor encontrado no tempo limite.")
+        finally:
+            sock_udp.close()
 
-                dados = {
-                    "espaço_livre_hd": Sistema.espaco_livre_hd(),
-                    "qtd_processadores": Sistema.qtd_processadores(),
-                    "espaco_memoria": Sistema.espaco_memoria(),
-                    "temperatura": Sistema.temperatura()
-                }
+    def enviar_info(self):
+        if not self.servidor_encontrado:
+            print("Não é possível enviar dados, nenhum servidor foi encontrado.")
+            return
 
-                dados_json = json.dumps(dados)
-                s.send(dados_json.encode("utf-8"))
-                print("Dados enviados ao servidor.")
+        print("Coletando informações do sistema...")
+        dados_coletados = {
+            "qtd_processadores": Sistema.qtd_processadores(),
+            "memoria_ram_livre": Sistema.espaco_memoria(),
+            "espaco_disco_livre": Sistema.espaco_disco_livre(),
+            "ips_interfaces": Sistema.ips_interfaces(),
+            "interfaces_desativadas": Sistema.interfaces_desativadas(),
+            "portas_tcp_abertas": Sistema.portas_tcp_abertas(),
+            "portas_udp_abertas": Sistema.portas_udp_abertas(),
+        }
+
+        dados_criptografados = self.fernet.encrypt(
+            json.dumps(dados_coletados).encode('utf-8')
+        )
+        
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock_tcp:
+                print(f"Conectando a {self.servidor_encontrado}...")
+                sock_tcp.connect(self.servidor_encontrado)
+                sock_tcp.sendall(dados_criptografados)
+                print("Dados enviados com sucesso!")
         except Exception as e:
-            print(f"Erro ao enviar dados ao servidor: {e}")
+            print(f"Falha ao enviar dados: {e}")
+
 
 def main():
-    c = Cliente()
-    while True:
-        c.enviar_info()
-        time.sleep(10)
+    # Orquestra a execução do cliente
+    cliente = Cliente()
+    cliente.escutarServidores()
+    cliente.enviar_info()
+    print("Cliente finalizou sua execução.")
 
 if __name__ == "__main__":
     main()
