@@ -1,4 +1,3 @@
-# cliente_final.py
 import socket
 import json
 from cryptography.fernet import Fernet
