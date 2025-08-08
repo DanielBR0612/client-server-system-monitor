@@ -27,7 +27,6 @@ class Servidor:
             time.sleep(10)
 
     def lidar_com_cliente(self, conexao, endereco):
-        """Lógica para tratar um único cliente."""
         ip_cliente = endereco[0]
         print(f"\n[INFO] Conexão aceita de {ip_cliente}. Processando...")
         try:
@@ -49,7 +48,6 @@ class Servidor:
             conexao.close()
 
     def iniciar_servidor_tcp(self):
-        """Este método agora roda em uma thread, apenas ouvindo conexões."""
         servidor_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         servidor_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         servidor_socket.bind((self.ip, self.porta))
@@ -74,7 +72,6 @@ class Servidor:
         print("[TCP] Servidor TCP encerrado.")
 
     def ligar(self):
-        """Inicia os 'trabalhadores' (threads) do servidor."""
         thread_broadcast = Thread(target=self.publicarCoiso, daemon=True)
         thread_broadcast.start()
         
@@ -82,7 +79,6 @@ class Servidor:
         thread_servidor.start()
 
     def desligar(self):
-        """Sinaliza para as threads pararem."""
         print("\nFinalizando o servidor...")
         self.servidor_online = False
         time.sleep(1.5) 
@@ -122,7 +118,6 @@ class Servidor:
 
 
 def menu_interativo(servidor: Servidor):
-    """Loop principal que mostra o menu e interage com o usuário."""
     time.sleep(1) 
     while servidor.servidor_online:
         print("\n--- Menu do Servidor ---")
